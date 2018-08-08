@@ -4,18 +4,25 @@
 module Main where
 
 import Brick
-import qualified Brick.Main as M
-import qualified Brick.Types as T
-import qualified Brick.Focus as F
+import qualified Brick.Main           as M
+import qualified Brick.Types          as T
+import qualified Brick.Focus          as F
 import qualified Brick.Widgets.Center as C
-import qualified Brick.Widgets.Edit as E
-import qualified Brick.AttrMap as A
-import qualified Graphics.Vty as V
+import qualified Brick.Widgets.Edit   as E
+import qualified Brick.AttrMap        as A
+import qualified Brick.Widgets.List   as L
+import qualified Graphics.Vty         as V
+import Brick.Widgets.Core
+       ( vBox
+       )
 
 import Data.Aeson
 import Data.Aeson.Types
 import Network.Wreq
 import Control.Lens
+
+import           Data.ByteString.Char8  (pack)
+import           System.Environment     (getEnv)
 
 data View = View { id :: Int, name :: String } deriving Show
 instance FromJSON View where
@@ -76,7 +83,10 @@ theApp =
 
 main :: IO ()
 main = do
-  let opts = defaults & header "Authorization" .~ ["Basic"]
+  auth <- getEnv "JIRA_AUTH_TOKEN"
+  let authHeader = "Basic " ++ auth
+      opts       = defaults & header "Authorization" .~ [pack authHeader]
+
   r <- asValue =<< getWith opts "https://pelotoncycle.atlassian.net/rest/greenhopper/1.0/rapidview"
 
   let body   = r ^. responseBody
@@ -85,8 +95,8 @@ main = do
   print views'
 
   let views'' = case views' of
-        Just v -> v
-        _      -> []
+        Just v  -> v
+        Nothing -> []
 
       initialState = AppState { _views=views'', _focusRing=F.focusRing [Edit1, Edit2] }
 
