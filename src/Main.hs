@@ -10,14 +10,17 @@ import qualified Brick.Focus          as F
 import qualified Brick.Widgets.Center as C
 import qualified Brick.Widgets.Edit   as E
 import qualified Brick.AttrMap        as A
+import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List   as L
 import qualified Graphics.Vty         as V
 import Brick.Widgets.Core
        ( vBox
        )
 
-import Data.Aeson
-import Data.Aeson.Types
+import           Data.Aeson
+import           Data.Aeson.Types
+import qualified Data.Vector as Vec
+import           Data.Monoid
 import Network.Wreq
 import Control.Lens
 
@@ -37,23 +40,45 @@ ui = str "Hello, world!"
 
 data Name = Edit1 | Edit2 deriving (Eq, Ord)
 
-data AppState = AppState { _focusRing :: F.FocusRing Name,  _views :: [View] }
+data AppState = AppState {
+  _focusRing :: F.FocusRing Name
+  , _views :: [View]
+  , _position :: Int
+  }
 
 makeLenses ''AppState
 
-drawUI :: AppState -> [T.Widget Name]
+listDrawElement :: (Show a) => Bool -> a -> Widget ()
+listDrawElement sel a =
+  let selStr s = if sel
+                 then withAttr customAttr (str $ "<" <> s <> ">")
+                 else str s
+  in C.hCenter $ str "Item " <+> (selStr $ show a)
+
+customAttr :: A.AttrName
+customAttr = L.listSelectedAttr <> "custom"
+
+drawUI :: AppState -> [T.Widget ()]
 drawUI st = [ui]
     where
 --        e1 = F.withFocusRing (st^.focusRing) (E.renderEditor (str . unlines)) (st^.edit1)
 --        e2 = F.withFocusRing (st^.focusRing) (E.renderEditor (str . unlines)) (st^.edit2)
-
+        label = str "Item" <+> str (show pos)
+        items = L.list () (Vec.fromList ["a", "b", "c"])
+        pos = view position st
+        box = B.borderWithLabel label $
+          hLimit 25 $
+          vLimit 15 $
+          L.renderList listDrawElement True (items pos)
         ui = C.center $
-            str "Press Tab to switch between editors, Esc to quit."
+          vBox [ C.hCenter box ]
 
-appEvent :: AppState -> T.BrickEvent Name e -> T.EventM Name (T.Next AppState)
+appEvent :: AppState -> T.BrickEvent () e -> T.EventM () (T.Next AppState)
 appEvent st (T.VtyEvent ev) =
     case ev of
-        V.EvKey V.KEsc [] -> M.halt st
+        V.EvKey V.KEsc []    -> M.halt st
+        V.EvKey (V.KDown) [] -> M.continue =<< (L.handleListEvent ev (view views st))
+        V.EvKey (V.KUp) []   -> M.continue $ over position (subtract 1) $ st
 --        V.EvKey (V.KChar '\t') [] -> M.continue $ st & focusRing %~ F.focusNext
 --        V.EvKey V.KBackTab [] -> M.continue $ st & focusRing %~ F.focusPrev
 --
@@ -72,10 +97,10 @@ theMap = A.attrMap V.defAttr
     , (E.editFocusedAttr,            V.black `on` V.yellow)
     ]
 
-theApp :: M.App AppState e Name
+theApp :: M.App AppState e ()
 theApp =
     M.App { M.appDraw = drawUI
-          , M.appChooseCursor = appCursor
+          , M.appChooseCursor = M.showFirstCursor
           , M.appHandleEvent = appEvent
           , M.appStartEvent = return
           , M.appAttrMap = const theMap
@@ -98,7 +123,11 @@ main = do
         Just v  -> v
         Nothing -> []
 
-      initialState = AppState { _views=views'', _focusRing=F.focusRing [Edit1, Edit2] }
+      initialState = AppState {
+          _views=views''
+        , _focusRing=F.focusRing [Edit1, Edit2]
+        , _position=0
+        }
 
   st <- M.defaultMain theApp initialState
 

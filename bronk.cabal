@@ -30,3 +30,4 @@ executable bronk
                      , text
                      , transformers
                      , vty
+                     , vector
