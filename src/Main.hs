@@ -22,6 +22,8 @@ import           Data.Aeson
 import           Data.Aeson.Types
 import qualified Data.Vector as Vec
 import           Data.Monoid
+import           Data.List (sortBy)
+import           Data.Ord  (comparing)
 import Network.Wreq
 import Control.Lens
 
@@ -41,9 +43,6 @@ instance ShowUser Board where
 boardsFromAPI :: Value -> Parser [Board]
 boardsFromAPI = withObject "views" $ \o -> o .: "views"
 
-ui :: Widget ()
-ui = str "Hello, world!"
-
 data Name = Edit1 | Edit2 deriving (Eq, Ord)
 
 data AppState = AppState {
@@ -57,7 +56,7 @@ makeLenses ''AppState
 listDrawElement :: (ShowUser a) => Bool -> a -> Widget ()
 listDrawElement sel a =
   let selStr s = if sel
-                 then withAttr customAttr (str $ "<" <> s <> ">")
+                 then withAttr customAttr (str $ "> " <> s)
                  else str s
   in (selStr $ showUser a)
 
@@ -70,8 +69,6 @@ drawUI st = [ui]
 --        e1 = F.withFocusRing (st^.focusRing) (E.renderEditor (str . unlines)) (st^.edit1)
 --        e2 = F.withFocusRing (st^.focusRing) (E.renderEditor (str . unlines)) (st^.edit2)
         label = str "Boards"
-        items = L.list () (Vec.fromList ["a", "b", "c"])
-        pos = view position st
         box = B.borderWithLabel label $
           hLimit 50 $
           vLimit 50 $
@@ -110,6 +107,7 @@ theMap :: A.AttrMap
 theMap = A.attrMap V.defAttr
     [ (E.editAttr,                   V.white `on` V.blue)
     , (E.editFocusedAttr,            V.black `on` V.yellow)
+    , (customAttr,                   fg V.cyan)
     ]
 
 theApp :: M.App AppState e ()
@@ -120,6 +118,9 @@ theApp =
           , M.appStartEvent = return
           , M.appAttrMap = const theMap
           }
+
+sortByName :: [Board] -> [Board]
+sortByName = sortBy (comparing name)
 
 main :: IO ()
 main = do
@@ -132,10 +133,8 @@ main = do
   let body   = r ^. responseBody
       views' = parseMaybe boardsFromAPI body
 
-  print views'
-
   let views'' = case views' of
-        Just v  -> L.list () (Vec.fromList v)
+        Just v  -> L.list () $ Vec.fromList $ sortByName v
         Nothing -> L.list () (Vec.empty)
 
       initialState = AppState {
