@@ -48,10 +48,19 @@ data Name = Edit1 | Edit2 deriving (Eq, Ord)
 data AppState = AppState {
   _focusRing  :: F.FocusRing Name
   , _boards   :: L.List () Board
-  , _position :: Int
   }
 
 makeLenses ''AppState
+
+theApp :: M.App AppState e ()
+theApp =
+    M.App { M.appDraw = drawUI
+          , M.appChooseCursor = M.showFirstCursor
+          , M.appHandleEvent = appEvent
+          , M.appStartEvent = return
+          , M.appAttrMap = const theMap
+          }
+
 
 listDrawElement :: (ShowUser a) => Bool -> a -> Widget ()
 listDrawElement sel a =
@@ -66,8 +75,6 @@ customAttr = L.listSelectedAttr <> "custom"
 drawUI :: AppState -> [T.Widget ()]
 drawUI st = [ui]
     where
---        e1 = F.withFocusRing (st^.focusRing) (E.renderEditor (str . unlines)) (st^.edit1)
---        e2 = F.withFocusRing (st^.focusRing) (E.renderEditor (str . unlines)) (st^.edit2)
         label = str "Boards"
         box = B.borderWithLabel label $
           hLimit 50 $
@@ -83,21 +90,6 @@ appEvent st (T.VtyEvent ev) =
         _ ->
           let l' = L.handleListEvent ev (view boards st)
           in l' >>= (\l -> return $ set boards l st) >>= M.continue
---        V.EvKey (V.KUp) [] ->
---          let l' = L.handleListEvent ev (view boards st)
---          in l' >>= (\l -> return $ set boards l st) >>= M.continue
-
---           l' <- L.handleListEvent ev (view boards st)
---           let newState = set boards l' st
---           M.continue newState
-        -- V.EvKey (V.KUp) []   -> M.continue $ over position (subtract 1) $ st
---        V.EvKey (V.KChar '\t') [] -> M.continue $ st & focusRing %~ F.focusNext
---        V.EvKey V.KBackTab [] -> M.continue $ st & focusRing %~ F.focusPrev
---
---        _ -> M.continue =<< case F.focusGetCurrent (st^.focusRing) of
---               Just Edit1 -> T.handleEventLensed st edit1 E.handleEditorEvent ev
---               Just Edit2 -> T.handleEventLensed st edit2 E.handleEditorEvent ev
---               Nothing -> return st
 appEvent st _ = M.continue st
 
 appCursor :: AppState -> [T.CursorLocation Name] -> Maybe (T.CursorLocation Name)
@@ -110,14 +102,6 @@ theMap = A.attrMap V.defAttr
     , (customAttr,                   fg V.cyan)
     ]
 
-theApp :: M.App AppState e ()
-theApp =
-    M.App { M.appDraw = drawUI
-          , M.appChooseCursor = M.showFirstCursor
-          , M.appHandleEvent = appEvent
-          , M.appStartEvent = return
-          , M.appAttrMap = const theMap
-          }
 
 sortByName :: [Board] -> [Board]
 sortByName = sortBy (comparing name)
@@ -140,7 +124,6 @@ main = do
       initialState = AppState {
           _boards=views'' 0
         , _focusRing=F.focusRing [Edit1, Edit2]
-        , _position=0
         }
 
   st <- M.defaultMain theApp initialState
