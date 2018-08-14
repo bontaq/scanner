@@ -49,9 +49,10 @@ data Page =
   | ActiveSprint
 
 data AppState = AppState {
-  _focusRing  :: F.FocusRing Name
-  , _boards   :: L.List () Board
-  , _page     :: Page
+  _focusRing     :: F.FocusRing Name
+  , _boards      :: L.List () Board
+  , _page        :: Page
+  , _activeBoard :: Maybe Int
   }
 
 makeLenses ''AppState
@@ -88,6 +89,9 @@ drawUI st =
           L.renderList listDrawElement True (view boards st)
         ui = C.vCenter $
           vBox [ C.hCenter box ]
+    ActiveSprint -> [ui]
+      where
+        ui = vBox [ str "hello" ]
 
 appEvent :: AppState -> T.BrickEvent () e -> T.EventM () (T.Next AppState)
 appEvent st (T.VtyEvent ev) =
@@ -130,9 +134,10 @@ main = do
         Nothing -> L.list () (Vec.empty)
 
       initialState = AppState {
-          _boards    = views'' 0
-        , _focusRing = F.focusRing [Edit1, Edit2]
-        , _page      = BoardSelection
+          _boards      = views'' 0
+        , _focusRing   = F.focusRing [Edit1, Edit2]
+        , _page        = BoardSelection
+        , _activeBoard = Nothing
         }
 
   st <- M.defaultMain theApp initialState
