@@ -7,6 +7,7 @@ import Brick
 import qualified Brick.Main           as M
 import qualified Brick.Types          as T
 import qualified Brick.Focus          as F
+import qualified Brick.Widgets.Core   as Core
 import qualified Brick.Widgets.Center as C
 import qualified Brick.Widgets.Edit   as E
 import qualified Brick.AttrMap        as A
@@ -27,13 +28,18 @@ import Control.Lens
 import           Data.ByteString.Char8  (pack)
 import           System.Environment     (getEnv)
 
-data View = View { id :: Int, name :: String } deriving Show
-instance FromJSON View where
-  parseJSON = withObject "view" $ \o ->
-    View <$> o .: "id" <*> o .: "name"
+class ShowUser a where
+  showUser :: a -> String
 
-viewsFromAPI :: Value -> Parser [View]
-viewsFromAPI = withObject "views" $ \o -> o .: "views"
+data Board = Board { id :: Int, name :: String } deriving Show
+instance FromJSON Board where
+  parseJSON = withObject "view" $ \o ->
+    Board <$> o .: "id" <*> o .: "name"
+instance ShowUser Board where
+  showUser (Board id name) = name
+
+boardsFromAPI :: Value -> Parser [Board]
+boardsFromAPI = withObject "views" $ \o -> o .: "views"
 
 ui :: Widget ()
 ui = str "Hello, world!"
@@ -41,19 +47,19 @@ ui = str "Hello, world!"
 data Name = Edit1 | Edit2 deriving (Eq, Ord)
 
 data AppState = AppState {
-  _focusRing :: F.FocusRing Name
-  , _views :: [View]
+  _focusRing  :: F.FocusRing Name
+  , _boards   :: L.List () Board
   , _position :: Int
   }
 
 makeLenses ''AppState
 
-listDrawElement :: (Show a) => Bool -> a -> Widget ()
+listDrawElement :: (ShowUser a) => Bool -> a -> Widget ()
 listDrawElement sel a =
   let selStr s = if sel
                  then withAttr customAttr (str $ "<" <> s <> ">")
                  else str s
-  in C.hCenter $ str "Item " <+> (selStr $ show a)
+  in (selStr $ showUser a)
 
 customAttr :: A.AttrName
 customAttr = L.listSelectedAttr <> "custom"
@@ -63,22 +69,31 @@ drawUI st = [ui]
     where
 --        e1 = F.withFocusRing (st^.focusRing) (E.renderEditor (str . unlines)) (st^.edit1)
 --        e2 = F.withFocusRing (st^.focusRing) (E.renderEditor (str . unlines)) (st^.edit2)
-        label = str "Item" <+> str (show pos)
+        label = str "Boards"
         items = L.list () (Vec.fromList ["a", "b", "c"])
         pos = view position st
         box = B.borderWithLabel label $
-          hLimit 25 $
-          vLimit 15 $
-          L.renderList listDrawElement True (items pos)
-        ui = C.center $
+          hLimit 50 $
+          vLimit 50 $
+          L.renderList listDrawElement True (view boards st)
+        ui = C.vCenter $
           vBox [ C.hCenter box ]
 
 appEvent :: AppState -> T.BrickEvent () e -> T.EventM () (T.Next AppState)
 appEvent st (T.VtyEvent ev) =
     case ev of
         V.EvKey V.KEsc []    -> M.halt st
-        V.EvKey (V.KDown) [] -> M.continue =<< (L.handleListEvent ev (view views st))
-        V.EvKey (V.KUp) []   -> M.continue $ over position (subtract 1) $ st
+        _ ->
+          let l' = L.handleListEvent ev (view boards st)
+          in l' >>= (\l -> return $ set boards l st) >>= M.continue
+--        V.EvKey (V.KUp) [] ->
+--          let l' = L.handleListEvent ev (view boards st)
+--          in l' >>= (\l -> return $ set boards l st) >>= M.continue
+
+--           l' <- L.handleListEvent ev (view boards st)
+--           let newState = set boards l' st
+--           M.continue newState
+        -- V.EvKey (V.KUp) []   -> M.continue $ over position (subtract 1) $ st
 --        V.EvKey (V.KChar '\t') [] -> M.continue $ st & focusRing %~ F.focusNext
 --        V.EvKey V.KBackTab [] -> M.continue $ st & focusRing %~ F.focusPrev
 --
@@ -115,16 +130,16 @@ main = do
   r <- asValue =<< getWith opts "https://pelotoncycle.atlassian.net/rest/greenhopper/1.0/rapidview"
 
   let body   = r ^. responseBody
-      views' = parseMaybe viewsFromAPI body
+      views' = parseMaybe boardsFromAPI body
 
   print views'
 
   let views'' = case views' of
-        Just v  -> v
-        Nothing -> []
+        Just v  -> L.list () (Vec.fromList v)
+        Nothing -> L.list () (Vec.empty)
 
       initialState = AppState {
-          _views=views''
+          _boards=views'' 0
         , _focusRing=F.focusRing [Edit1, Edit2]
         , _position=0
         }
