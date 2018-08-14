@@ -44,10 +44,14 @@ boardsFromAPI :: Value -> Parser [Board]
 boardsFromAPI = withObject "views" $ \o -> o .: "views"
 
 data Name = Edit1 | Edit2 deriving (Eq, Ord)
+data Page =
+  BoardSelection
+  | ActiveSprint
 
 data AppState = AppState {
   _focusRing  :: F.FocusRing Name
   , _boards   :: L.List () Board
+  , _page     :: Page
   }
 
 makeLenses ''AppState
@@ -73,8 +77,10 @@ customAttr :: A.AttrName
 customAttr = L.listSelectedAttr <> "custom"
 
 drawUI :: AppState -> [T.Widget ()]
-drawUI st = [ui]
-    where
+drawUI st =
+  case view page st of
+    BoardSelection -> [ui]
+      where
         label = str "Boards"
         box = B.borderWithLabel label $
           hLimit 50 $
@@ -85,7 +91,9 @@ drawUI st = [ui]
 
 appEvent :: AppState -> T.BrickEvent () e -> T.EventM () (T.Next AppState)
 appEvent st (T.VtyEvent ev) =
-    case ev of
+  case view page st of
+    BoardSelection ->
+      case ev of
         V.EvKey V.KEsc []    -> M.halt st
         _ ->
           let l' = L.handleListEvent ev (view boards st)
@@ -122,8 +130,9 @@ main = do
         Nothing -> L.list () (Vec.empty)
 
       initialState = AppState {
-          _boards=views'' 0
-        , _focusRing=F.focusRing [Edit1, Edit2]
+          _boards    = views'' 0
+        , _focusRing = F.focusRing [Edit1, Edit2]
+        , _page      = BoardSelection
         }
 
   st <- M.defaultMain theApp initialState
