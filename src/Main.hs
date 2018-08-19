@@ -57,20 +57,28 @@ instance FromJSON Sprint where
 instance ShowUser Sprint where
   showUser (Sprint id name state) = name ++ " " ++ state
 
+makeLenses ''Sprint
+
 data ApiReturn a = ApiReturn {
   _isLast :: Bool
-  -- , _total :: Int
   , _values :: a
 } deriving Show
 instance (FromJSON a) => FromJSON (ApiReturn a) where
   parseJSON = withObject "return" $ \o ->
     ApiReturn <$> o .: "isLast" <*> o .: "values"
-    -- ApiReturn <$> o .: "isLast" <*> o .: "isLast" <*> o .: "values"
 
 makeLenses ''ApiReturn
 
-sprintsFromAPI :: Value -> Parser [Sprint]
-sprintsFromAPI = withObject "values" $ (flip (.:)) "values"
+data Issue = Issue {
+  _iId :: Int
+  , _iDescription :: String
+  } deriving Show
+instance FromJSON Issue where
+  parseJSON = withObject "issue" $ \o -> do
+    id          <- o .: "id"
+    fields      <- o .: "fields"
+    description <- fields .: "description"
+    return (Issue id description)
 
 data Name = Edit1 | Edit2 deriving (Eq, Ord)
 data Page =
@@ -84,12 +92,14 @@ data Request a =
   | Finished a
 
 data AppState = AppState {
-  _focusRing     :: F.FocusRing Name
-  , _boards      :: L.List () Board
-  , _page        :: Page
-  , _activeBoard :: Maybe Board
-  , _sprints     :: L.List () Sprint
-  , _opts        :: Network.Wreq.Options
+  _focusRing      :: F.FocusRing Name
+  , _boards       :: L.List () Board
+  , _page         :: Page
+  , _activeBoard  :: Maybe Board
+  , _activeSprint :: Maybe Sprint
+  , _issues       :: L.List () Issue
+  , _sprints      :: L.List () Sprint
+  , _opts         :: Network.Wreq.Options
   }
 
 makeLenses ''AppState
@@ -193,13 +203,24 @@ appEvent st (T.VtyEvent ev) =
     SprintSelection ->
       case ev of
         V.EvKey V.KEsc   [] -> M.halt st
+        V.EvKey V.KEnter [] -> do
+          let sprints' = (view sprints st) ^. L.listElementsL
+              selectedSprintIndex = fromJust $ (view sprints st) ^. L.listSelectedL
+              selectedSprint = sprints' Vec.! selectedSprintIndex
+              selectedSprintId = (view sId selectedSprint)
+          let newState = st
+                & activeSprint .~ (Just selectedSprint)
+                & page         .~ ActiveSprint
+          M.continue newState
         _ ->
           let l' = L.handleListEvent ev (view sprints st)
           in l' >>= (\l -> return $ set sprints l st) >>= M.continue
 
 appEvent st _ = M.continue st
 
-appCursor :: AppState -> [T.CursorLocation Name] -> Maybe (T.CursorLocation Name)
+appCursor :: AppState
+          -> [T.CursorLocation Name]
+          -> Maybe (T.CursorLocation Name)
 appCursor = F.focusRingCursor (^.focusRing)
 
 theMap :: A.AttrMap
@@ -219,7 +240,9 @@ main = do
   let authHeader = "Basic " ++ auth
       opts       = defaults & header "Authorization" .~ [pack authHeader]
 
-  r <- asValue =<< getWith opts "https://pelotoncycle.atlassian.net/rest/agile/1.0/board"
+  r <-
+    asValue =<< getWith opts
+    "https://pelotoncycle.atlassian.net/rest/agile/1.0/board"
 
   let body   = r ^. responseBody
       views' = parseMaybe boardsFromAPI body
@@ -229,12 +252,14 @@ main = do
         Nothing -> L.list () (Vec.empty)
 
       initialState = AppState {
-          _boards      = views'' 0
-        , _focusRing   = F.focusRing [Edit1, Edit2]
-        , _page        = BoardSelection
-        , _activeBoard = Nothing
-        , _sprints     = (L.list () (Vec.empty)) 0
-        , _opts        = opts
+          _boards       = views'' 0
+        , _focusRing    = F.focusRing [Edit1, Edit2]
+        , _page         = BoardSelection
+        , _activeBoard  = Nothing
+        , _activeSprint = Nothing
+        , _issues       = (L.list () (Vec.empty)) 0
+        , _sprints      = (L.list () (Vec.empty)) 0
+        , _opts         = opts
         }
 
   st <- M.defaultMain theApp initialState
