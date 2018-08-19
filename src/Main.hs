@@ -78,11 +78,11 @@ instance (FromJSON a) => FromJSON (AltApiReturn a) where
     AltApiReturn <$> o .: "total" <*> o .: "issues"
 
 data Issue = Issue {
-  _iId :: Int
-  , _iDescription :: String
+  _iId :: String
+  , _iDescription :: Maybe String
   } deriving Show
 instance ShowUser Issue where
-  showUser (Issue id description) = (show id) ++ " " ++ description
+  showUser (Issue id description) = (show id) ++ " " ++ (fromJust description)
 instance FromJSON Issue where
   parseJSON = withObject "issue" $ \o -> do
     id          <- o .: "id"
@@ -205,16 +205,16 @@ getIssues' opts sprintId offset = do
     ("https://pelotoncycle.atlassian.net/rest/agile/1.0/sprint/"
      ++ (show sprintId)
      ++ "/issue")
-  error $ show (r ^. responseBody)
+  -- error $ show (r ^. responseBody)
   let issuesResponse =
         eitherDecode (r ^. responseBody) :: Either String (AltApiReturn [Issue])
       issues = case issuesResponse of
         Right (AltApiReturn _ values) -> values
         Left e -> error $ show (r ^. responseBody)
-      isLast = case issuesResponse of
-        Right (AltApiReturn isLast _) -> isLast
+      total = case issuesResponse of
+        Right (AltApiReturn total _) -> total
         Left e -> error e
-  allIssues <- case isLast of
+  allIssues <- case total > (offset + 50) of
     False -> do
       newIssues <- (getIssues' opts sprintId (offset + 50))
       return $ issues ++ newIssues
