@@ -24,8 +24,11 @@ import qualified Data.Vector as Vec
 import           Data.Monoid
 import           Data.List (sortBy)
 import           Data.Ord  (comparing)
-import Network.Wreq
-import Control.Lens
+import           Network.Wreq
+import           Control.Lens
+import           Control.Monad.IO.Class (liftIO)
+import           Data.Maybe (fromJust)
+ -- import           Control.Monad.Extra    (liftMaybe)
 
 import           Data.ByteString.Char8  (pack)
 import           System.Environment     (getEnv)
@@ -51,6 +54,11 @@ data Sprint = Sprint {
 instance FromJSON Sprint where
   parseJSON = withObject "sprint" $ \o ->
     Sprint <$> o .: "id" <*> o .: "name" <*> o .: "state"
+instance ShowUser Sprint where
+  showUser (Sprint id name state) = name ++ " " ++ state
+
+sprintsFromAPI :: Value -> Parser [Sprint]
+sprintsFromAPI = withObject "values" $ (flip (.:)) "values"
 
 data Name = Edit1 | Edit2 deriving (Eq, Ord)
 data Page =
@@ -68,7 +76,8 @@ data AppState = AppState {
   , _boards      :: L.List () Board
   , _page        :: Page
   , _activeBoard :: Maybe Board
-  , _sprints     :: Request (L.List () Sprint)
+  , _sprints     :: L.List () Sprint
+  , _opts        :: Network.Wreq.Options
   }
 
 makeLenses ''AppState
@@ -110,24 +119,52 @@ drawUI st =
         ui = vBox [ str "hello" ]
     SprintSelection -> [ui]
       where
-        ui = vBox [ str "sprint selection" ]
+        label = str "Sprints"
+        box = B.borderWithLabel label $
+          hLimit 50 $
+          vLimit 50 $
+          L.renderList listDrawElement True (view sprints st)
+        ui = C.vCenter $
+          vBox [ C.hCenter box ]
 
--- I think the request for data would have to happen here
+getSprints :: AppState -> Int -> IO (L.List () Sprint)
+getSprints state boardId = do
+  let opts' = view opts state
+  r <- asValue =<< getWith opts' ("https://pelotoncycle.atlassian.net/rest/agile/1.0/board/" ++ (show boardId) ++ "/sprint")
+  print (r ^. responseBody)
+  let sprints = parseEither sprintsFromAPI $ r ^. responseBody
+      sprints' = case sprints of
+        Right s -> (L.list () $ Vec.fromList s) 0
+        Left  e -> error e
+  return sprints'
+
 appEvent :: AppState -> T.BrickEvent () e -> T.EventM () (T.Next AppState)
 appEvent st (T.VtyEvent ev) =
   case view page st of
     BoardSelection ->
       case ev of
         V.EvKey V.KEsc   [] -> M.halt st
-        V.EvKey V.KEnter [] ->
+        V.EvKey V.KEnter [] -> do
           let boards' = (view boards st) ^. L.listElementsL
-              selectedBoardIndex = (view boards st) ^. L.listSelectedL
-              selectedBoard = selectedBoardIndex >>= \index -> pure $ boards' Vec.! index
-              selectedBoardId = selectedBoard >>= \b -> pure (Main.id b)
-          in (pure $ set activeBoard (selectedBoard) st) >>= M.continue
+              selectedBoardIndex = fromJust $ (view boards st) ^. L.listSelectedL
+              selectedBoard = boards' Vec.! selectedBoardIndex
+              selectedBoardId = Main.id selectedBoard
+          sprints' <- liftIO $ getSprints st selectedBoardId
+          let newState = st
+                & activeBoard .~ (Just selectedBoard)
+                & page        .~ SprintSelection
+                & sprints     .~ sprints'
+          M.continue newState
         _ ->
           let l' = L.handleListEvent ev (view boards st)
           in l' >>= (\l -> return $ set boards l st) >>= M.continue
+    SprintSelection ->
+      case ev of
+        V.EvKey V.KEsc   [] -> M.halt st
+        _ ->
+          let l' = L.handleListEvent ev (view sprints st)
+          in l' >>= (\l -> return $ set sprints l st) >>= M.continue
+
 appEvent st _ = M.continue st
 
 appCursor :: AppState -> [T.CursorLocation Name] -> Maybe (T.CursorLocation Name)
@@ -155,8 +192,6 @@ main = do
   let body   = r ^. responseBody
       views' = parseMaybe boardsFromAPI body
 
-  print body
-
   let views'' = case views' of
         Just v  -> L.list () $ Vec.fromList $ sortByName v
         Nothing -> L.list () (Vec.empty)
@@ -166,7 +201,8 @@ main = do
         , _focusRing   = F.focusRing [Edit1, Edit2]
         , _page        = BoardSelection
         , _activeBoard = Nothing
-        , _sprints     = Unstarted
+        , _sprints     = (L.list () (Vec.empty)) 0
+        , _opts        = opts
         }
 
   st <- M.defaultMain theApp initialState
