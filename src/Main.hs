@@ -69,10 +69,20 @@ instance (FromJSON a) => FromJSON (ApiReturn a) where
 
 makeLenses ''ApiReturn
 
+data AltApiReturn a = AltApiReturn {
+  _aTotal :: Int
+  , _aIssues :: a
+  } deriving Show
+instance (FromJSON a) => FromJSON (AltApiReturn a) where
+  parseJSON = withObject "return" $ \o ->
+    AltApiReturn <$> o .: "total" <*> o .: "issues"
+
 data Issue = Issue {
   _iId :: Int
   , _iDescription :: String
   } deriving Show
+instance ShowUser Issue where
+  showUser (Issue id description) = (show id) ++ " " ++ description
 instance FromJSON Issue where
   parseJSON = withObject "issue" $ \o -> do
     id          <- o .: "id"
@@ -146,7 +156,13 @@ drawUI st =
           vBox [ C.hCenter box ]
     ActiveSprint -> [ui]
       where
-        ui = vBox [ str "hello" ]
+        label = str "Issues"
+        box = B.borderWithLabel label $
+          hLimit 50 $
+          vLimit 50 $
+          L.renderList listDrawElement True (view issues st)
+        ui = C.vCenter $
+          vBox [ C.hCenter box ]
 
 getSprints' :: Network.Wreq.Options -> Int -> Int -> IO [Sprint]
 getSprints' opts boardId offset = do
@@ -180,6 +196,40 @@ getSprints state boardId = do
   let sprints' = (L.list () $ Vec.fromList sprints) 0
   return sprints'
 
+getIssues' :: Network.Wreq.Options -> Int -> Int -> IO [Issue]
+getIssues' opts sprintId offset = do
+  let opts' = opts
+        & param "startAt" .~ [(Text.pack $ show offset)]
+        & param "maxResults" .~ ["50"]
+  r <- getWith opts'
+    ("https://pelotoncycle.atlassian.net/rest/agile/1.0/sprint/"
+     ++ (show sprintId)
+     ++ "/issue")
+  error $ show (r ^. responseBody)
+  let issuesResponse =
+        eitherDecode (r ^. responseBody) :: Either String (AltApiReturn [Issue])
+      issues = case issuesResponse of
+        Right (AltApiReturn _ values) -> values
+        Left e -> error $ show (r ^. responseBody)
+      isLast = case issuesResponse of
+        Right (AltApiReturn isLast _) -> isLast
+        Left e -> error e
+  allIssues <- case isLast of
+    False -> do
+      newIssues <- (getIssues' opts sprintId (offset + 50))
+      return $ issues ++ newIssues
+    True -> return issues
+  return allIssues
+
+getIssues :: AppState -> Int -> IO (L.List () Issue)
+getIssues state sprintId = do
+  let opts' = view opts state
+  issues <- getIssues' opts' sprintId 0
+
+  let issues' = (L.list () $ Vec.fromList issues) 0
+  return issues'
+
+
 appEvent :: AppState -> T.BrickEvent () e -> T.EventM () (T.Next AppState)
 appEvent st (T.VtyEvent ev) =
   case view page st of
@@ -208,13 +258,19 @@ appEvent st (T.VtyEvent ev) =
               selectedSprintIndex = fromJust $ (view sprints st) ^. L.listSelectedL
               selectedSprint = sprints' Vec.! selectedSprintIndex
               selectedSprintId = (view sId selectedSprint)
+          issues' <- liftIO $ getIssues st selectedSprintId
           let newState = st
+                & issues       .~ issues'
                 & activeSprint .~ (Just selectedSprint)
                 & page         .~ ActiveSprint
           M.continue newState
         _ ->
           let l' = L.handleListEvent ev (view sprints st)
           in l' >>= (\l -> return $ set sprints l st) >>= M.continue
+    ActiveSprint ->
+      case ev of
+        V.EvKey V.KEsc   [] -> M.halt st
+
 
 appEvent st _ = M.continue st
 
