@@ -28,7 +28,7 @@ import           Network.Wreq
 import           Control.Lens
 import           Control.Monad.IO.Class (liftIO)
 import           Data.Maybe (fromJust)
- -- import           Control.Monad.Extra    (liftMaybe)
+import qualified Data.Text as Text
 
 import           Data.ByteString.Char8  (pack)
 import           System.Environment     (getEnv)
@@ -56,6 +56,18 @@ instance FromJSON Sprint where
     Sprint <$> o .: "id" <*> o .: "name" <*> o .: "state"
 instance ShowUser Sprint where
   showUser (Sprint id name state) = name ++ " " ++ state
+
+data ApiReturn a = ApiReturn {
+  _isLast :: Bool
+  -- , _total :: Int
+  , _values :: a
+} deriving Show
+instance (FromJSON a) => FromJSON (ApiReturn a) where
+  parseJSON = withObject "return" $ \o ->
+    ApiReturn <$> o .: "isLast" <*> o .: "values"
+    -- ApiReturn <$> o .: "isLast" <*> o .: "isLast" <*> o .: "values"
+
+makeLenses ''ApiReturn
 
 sprintsFromAPI :: Value -> Parser [Sprint]
 sprintsFromAPI = withObject "values" $ (flip (.:)) "values"
@@ -91,7 +103,6 @@ theApp =
           , M.appAttrMap = const theMap
           }
 
-
 listDrawElement :: (ShowUser a) => Bool -> a -> Widget ()
 listDrawElement sel a =
   let selStr s = if sel
@@ -107,16 +118,13 @@ drawUI st =
   case view page st of
     BoardSelection -> [ui]
       where
-        label = str $ "Boards " <> (show $ view activeBoard st)
+        label = str "Boards"
         box = B.borderWithLabel label $
           hLimit 50 $
           vLimit 50 $
           L.renderList listDrawElement True (view boards st)
         ui = C.vCenter $
           vBox [ C.hCenter box ]
-    ActiveSprint -> [ui]
-      where
-        ui = vBox [ str "hello" ]
     SprintSelection -> [ui]
       where
         label = str "Sprints"
@@ -126,16 +134,40 @@ drawUI st =
           L.renderList listDrawElement True (view sprints st)
         ui = C.vCenter $
           vBox [ C.hCenter box ]
+    ActiveSprint -> [ui]
+      where
+        ui = vBox [ str "hello" ]
+
+getSprints' :: Network.Wreq.Options -> Int -> Int -> IO [Sprint]
+getSprints' opts boardId offset = do
+  let opts' = opts
+        & param "startAt" .~ [(Text.pack $ show offset)]
+        & param "maxResults" .~ ["50"]
+  r <- getWith opts'
+    ("https://pelotoncycle.atlassian.net/rest/agile/1.0/board/"
+     ++ (show boardId)
+     ++ "/sprint")
+  let sprintsResponse =
+        eitherDecode (r ^. responseBody) :: Either String (ApiReturn [Sprint])
+      sprints = case sprintsResponse of
+        Right (ApiReturn _ values) -> values
+        Left e -> error e
+      isLast = case sprintsResponse of
+        Right (ApiReturn isLast _) -> isLast
+        Left e -> error e
+  allSprints <- case isLast of
+    False -> do
+      newSprints <- (getSprints' opts boardId (offset + 50))
+      return $ sprints ++ newSprints
+    True -> return sprints
+  return allSprints
 
 getSprints :: AppState -> Int -> IO (L.List () Sprint)
 getSprints state boardId = do
   let opts' = view opts state
-  r <- asValue =<< getWith opts' ("https://pelotoncycle.atlassian.net/rest/agile/1.0/board/" ++ (show boardId) ++ "/sprint")
-  print (r ^. responseBody)
-  let sprints = parseEither sprintsFromAPI $ r ^. responseBody
-      sprints' = case sprints of
-        Right s -> (L.list () $ Vec.fromList s) 0
-        Left  e -> error e
+  sprints <- getSprints' opts' boardId 0
+
+  let sprints' = (L.list () $ Vec.fromList sprints) 0
   return sprints'
 
 appEvent :: AppState -> T.BrickEvent () e -> T.EventM () (T.Next AppState)
