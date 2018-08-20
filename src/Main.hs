@@ -82,7 +82,7 @@ data Issue = Issue {
   , _iDescription :: Maybe String
   } deriving Show
 instance ShowUser Issue where
-  showUser (Issue id description) = (show id) ++ " " ++ (fromJust description)
+  showUser (Issue id description) = (show id) ++ " " ++ (show description)
 instance FromJSON Issue where
   parseJSON = withObject "issue" $ \o -> do
     id          <- o .: "id"
@@ -200,12 +200,12 @@ getIssues' :: Network.Wreq.Options -> Int -> Int -> IO [Issue]
 getIssues' opts sprintId offset = do
   let opts' = opts
         & param "startAt" .~ [(Text.pack $ show offset)]
-        & param "maxResults" .~ ["50"]
+        & param "maxResults" .~ ["1"]
   r <- getWith opts'
     ("https://pelotoncycle.atlassian.net/rest/agile/1.0/sprint/"
      ++ (show sprintId)
      ++ "/issue")
-  -- error $ show (r ^. responseBody)
+  error $ show (r ^. responseBody)
   let issuesResponse =
         eitherDecode (r ^. responseBody) :: Either String (AltApiReturn [Issue])
       issues = case issuesResponse of
@@ -270,6 +270,9 @@ appEvent st (T.VtyEvent ev) =
     ActiveSprint ->
       case ev of
         V.EvKey V.KEsc   [] -> M.halt st
+        _ ->
+          let l' = L.handleListEvent ev (view issues st)
+          in l' >>= (\l -> return $ set issues l st) >>= M.continue
 
 
 appEvent st _ = M.continue st
@@ -283,7 +286,7 @@ theMap :: A.AttrMap
 theMap = A.attrMap V.defAttr
     [ (E.editAttr,                   V.white `on` V.blue)
     , (E.editFocusedAttr,            V.black `on` V.yellow)
-    , (customAttr,                   fg V.cyan)
+    , (customAttr,                   fg V.green)
     ]
 
 
