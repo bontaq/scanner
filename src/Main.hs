@@ -33,31 +33,9 @@ import qualified Data.Text as Text
 import           Data.ByteString.Char8  (pack)
 import           System.Environment     (getEnv)
 
-class ShowUser a where
-  showUser :: a -> String
-
-data Board = Board { id :: Int, name :: String } deriving Show
-instance FromJSON Board where
-  parseJSON = withObject "view" $ \o ->
-    Board <$> o .: "id" <*> o .: "name"
-instance ShowUser Board where
-  showUser (Board id name) = name
-
-boardsFromAPI :: Value -> Parser [Board]
-boardsFromAPI = withObject "values" $ \o -> o .: "values"
-
-data Sprint = Sprint {
-  _sId :: Int
-  , _sName :: String
-  , _sState :: String
-  } deriving Show
-instance FromJSON Sprint where
-  parseJSON = withObject "sprint" $ \o ->
-    Sprint <$> o .: "id" <*> o .: "name" <*> o .: "state"
-instance ShowUser Sprint where
-  showUser (Sprint id name state) = name ++ " " ++ state
-
-makeLenses ''Sprint
+import           Shared
+import           Sprint
+import           Board
 
 data ApiReturn a = ApiReturn {
   _isLast :: Bool
@@ -158,7 +136,7 @@ drawUI st =
       where
         label = str "Issues"
         box = B.borderWithLabel label $
-          hLimit 50 $
+          hLimit 100 $
           vLimit 50 $
           L.renderList listDrawElement True (view issues st)
         ui = C.vCenter $
@@ -173,6 +151,7 @@ getSprints' opts boardId offset = do
     ("https://pelotoncycle.atlassian.net/rest/agile/1.0/board/"
      ++ (show boardId)
      ++ "/sprint")
+
   let sprintsResponse =
         eitherDecode (r ^. responseBody) :: Either String (ApiReturn [Sprint])
       sprints = case sprintsResponse of
@@ -185,7 +164,7 @@ getSprints' opts boardId offset = do
     False -> do
       newSprints <- (getSprints' opts boardId (offset + 50))
       return $ sprints ++ newSprints
-    True -> return sprints
+    True -> pure sprints
   return allSprints
 
 getSprints :: AppState -> Int -> IO (L.List () Sprint)
@@ -200,25 +179,26 @@ getIssues' :: Network.Wreq.Options -> Int -> Int -> IO [Issue]
 getIssues' opts sprintId offset = do
   let opts' = opts
         & param "startAt" .~ [(Text.pack $ show offset)]
-        & param "maxResults" .~ ["1"]
+        & param "maxResults" .~ ["50"]
   r <- getWith opts'
     ("https://pelotoncycle.atlassian.net/rest/agile/1.0/sprint/"
      ++ (show sprintId)
      ++ "/issue")
-  error $ show (r ^. responseBody)
+
   let issuesResponse =
         eitherDecode (r ^. responseBody) :: Either String (AltApiReturn [Issue])
       issues = case issuesResponse of
         Right (AltApiReturn _ values) -> values
-        Left e -> error $ show (r ^. responseBody)
+        Left e -> error e
       total = case issuesResponse of
         Right (AltApiReturn total _) -> total
         Left e -> error e
   allIssues <- case total > (offset + 50) of
     False -> do
+      error $ (show offset) ++ " " ++ (show total)
       newIssues <- (getIssues' opts sprintId (offset + 50))
       return $ issues ++ newIssues
-    True -> return issues
+    True -> pure issues
   return allIssues
 
 getIssues :: AppState -> Int -> IO (L.List () Issue)
@@ -240,7 +220,7 @@ appEvent st (T.VtyEvent ev) =
           let boards' = (view boards st) ^. L.listElementsL
               selectedBoardIndex = fromJust $ (view boards st) ^. L.listSelectedL
               selectedBoard = boards' Vec.! selectedBoardIndex
-              selectedBoardId = Main.id selectedBoard
+              selectedBoardId = Board.id selectedBoard
           sprints' <- liftIO $ getSprints st selectedBoardId
           let newState = st
                 & activeBoard .~ (Just selectedBoard)
