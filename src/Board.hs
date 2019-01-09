@@ -21,3 +21,6 @@ instance ShowUser Board where
 
 boardsFromAPI :: Value -> Parser [Board]
 boardsFromAPI = withObject "values" $ \o -> o .: "values"
+
+valueToBoard :: [Value] -> Parser [Board]
+valueToBoard = mapM parseJSON

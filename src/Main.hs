@@ -269,9 +269,28 @@ theMap = A.attrMap V.defAttr
     , (customAttr,                   fg V.green)
     ]
 
-
 sortByName :: [Board] -> [Board]
 sortByName = sortBy (comparing name)
+
+isLast' :: Value -> Parser Bool
+isLast' = withObject "return" $ \o -> o .: "isLast"
+
+values' :: Value -> Parser [Value]
+values' = withObject "return" $ \o -> o .: "values"
+
+unspool :: Network.Wreq.Options -> String -> Int -> IO ([Value])
+unspool opts url offSet = do
+  let opts' = opts & param "startAt" .~ [(Text.pack $ show offSet)]
+  r <- asValue =<< getWith opts' url
+
+  let stop = fromJust $ parseMaybe isLast' (r ^. responseBody)
+      values = fromJust $ parseMaybe values' (r ^. responseBody)
+
+  if stop
+    then pure $ values
+    else do
+      v' <- unspool opts url (offSet + 50)
+      pure $ values ++ v'
 
 main :: IO ()
 main = do
@@ -279,12 +298,9 @@ main = do
   let authHeader = "Basic " ++ auth
       opts       = defaults & header "Authorization" .~ [pack authHeader]
 
-  r <-
-    asValue =<< getWith opts
-    "https://pelotoncycle.atlassian.net/rest/agile/1.0/board"
+  r <- unspool opts "https://pelotoncycle.atlassian.net/rest/agile/1.0/board" 0
 
-  let body   = r ^. responseBody
-      views' = parseMaybe boardsFromAPI body
+  let views' = parseMaybe (valueToBoard) r
 
   let views'' = case views' of
         Just v  -> L.list () $ Vec.fromList $ sortByName v
