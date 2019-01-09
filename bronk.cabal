@@ -13,7 +13,7 @@ build-type:          Simple
 cabal-version:       >=1.10
 extra-source-files:  README.md
 
-executable bronk
+executable scanner
   hs-source-dirs:      src
   main-is:             Main.hs
   default-language:    Haskell2010
@@ -35,3 +35,12 @@ executable bronk
                      , transformers
                      , vty
                      , vector
+
+executable widgets
+  hs-source-dirs:   src
+  main-is:          Widgets.hs
+  default-language: Haskell2010
+  ghc-options:
+              -threaded
+  build-depends:       base >= 4.7 && < 5
+                     , brick

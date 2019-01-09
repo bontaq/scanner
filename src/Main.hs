@@ -262,12 +262,15 @@ appCursor :: AppState
           -> Maybe (T.CursorLocation Name)
 appCursor = F.focusRingCursor (^.focusRing)
 
+globalDefault :: V.Attr
+globalDefault = V.green `on` V.black
+
 theMap :: A.AttrMap
-theMap = A.attrMap V.defAttr
-    [ (E.editAttr,                   V.white `on` V.blue)
-    , (E.editFocusedAttr,            V.black `on` V.yellow)
-    , (customAttr,                   fg V.green)
-    ]
+theMap = A.attrMap globalDefault
+  [ (E.editAttr,          V.white `on` V.blue)
+  , (E.editFocusedAttr,   V.black `on` V.yellow)
+  , (customAttr,          fg V.green)
+  ]
 
 sortByName :: [Board] -> [Board]
 sortByName = sortBy (comparing name)
