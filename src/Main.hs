@@ -35,7 +35,9 @@ import           System.Environment     (getEnv)
 
 import           Shared
 import           Sprint
-import           Board
+-- import           Board
+import qualified Board
+import Models
 
 data ApiReturn a = ApiReturn {
   _isLast :: Bool
@@ -79,16 +81,16 @@ data Request a =
   | Started
   | Finished a
 
-data AppState = AppState {
-  _focusRing      :: F.FocusRing Name
-  , _boards       :: L.List () Board
-  , _page         :: Page
-  , _activeBoard  :: Maybe Board
-  , _activeSprint :: Maybe Sprint
-  , _issues       :: L.List () Issue
-  , _sprints      :: L.List () Sprint
-  , _opts         :: Network.Wreq.Options
-  }
+-- data AppState = AppState {
+--   _focusRing      :: F.FocusRing Name
+--   , _boards       :: L.List () Board.Board
+--   , _page         :: Page
+--   , _activeBoard  :: Maybe Board.Board
+--   , _activeSprint :: Maybe Sprint
+--   , _issues       :: L.List () Issue
+--   , _sprints      :: L.List () Sprint
+--   , _opts         :: Network.Wreq.Options
+--   }
 
 makeLenses ''AppState
 
@@ -272,7 +274,7 @@ theMap = A.attrMap globalDefault
   , (customAttr,          fg V.green)
   ]
 
-sortByName :: [Board] -> [Board]
+sortByName :: [Board.Board] -> [Board.Board]
 sortByName = sortBy (comparing name)
 
 isLast' :: Value -> Parser Bool
